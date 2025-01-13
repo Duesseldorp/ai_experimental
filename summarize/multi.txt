@@ -1,0 +1,125 @@
+# Cell 1: Imports and Setup
+import os
+import requests
+from dotenv import load_dotenv
+from bs4 import BeautifulSoup
+from IPython.display import Markdown, display
+import openai  # Correct import for OpenAI
+
+# Cell 2: Load Environment Variables and Verify API Key
+load_dotenv(override=True)
+api_key = os.getenv('OPENAI_API_KEY')
+
+if not api_key:
+    print("No API key was found - please set the OPENAI_API_KEY in your .env file.")
+elif not api_key.startswith("sk-proj-"):
+    print("An API key was found, but it doesn't start with 'sk-proj-'; please check you're using the right key.")
+elif api_key.strip() != api_key:
+    print("An API key was found, but it has leading or trailing whitespace - please remove them.")
+else:
+    print("API key found and looks good so far!")
+    openai.api_key = api_key  # Set the API key for OpenAI
+
+# Cell 3: Define Headers for HTTP Requests
+headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/117.0.0.0 Safari/537.36"
+}
+
+# Cell 4: Define the Website Class
+class Website:
+    def __init__(self, url):
+        """
+        Create a Website object from the given URL using the BeautifulSoup library.
+        """
+        self.url = url
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()  # Raise an HTTPError if the HTTP request returned an unsuccessful status code
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching {url}: {e}")
+            self.title = "Error fetching the website"
+            self.text = ""
+            return
+
+        soup = BeautifulSoup(response.content, 'html.parser')
+        self.title = soup.title.string.strip() if soup.title and soup.title.string else "No title found"
+
+        # Remove irrelevant tags
+        for tag in soup.find_all(["script", "style", "img", "input", "nav", "footer", "header", "aside"]):
+            tag.decompose()
+
+        # Get text from the body
+        body = soup.body
+        if body:
+            self.text = body.get_text(separator="\n", strip=True)
+        else:
+            self.text = "No body content found."
+
+# Cell 5: Define System Prompt
+system_prompt = (
+    "You are an assistant that analyzes the contents of a website "
+    "and provides a short summary, ignoring text that might be navigation related. "
+    "Respond in markdown."
+)
+
+# Cell 6: Define User Prompt Function
+def user_prompt_for(website):
+    user_prompt = f"You are looking at a website titled '{website.title}'.\n"
+    user_prompt += (
+        "The contents of this website are as follows:\n"
+        "Please provide a short summary of this website in markdown. "
+        "If it includes news or announcements, then summarize these too.\n\n"
+    )
+    user_prompt += website.text
+    return user_prompt
+
+# Cell 7: Define Messages for OpenAI API
+def messages_for(website):
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt_for(website)}
+    ]
+
+# Cell 8: Define Summarization Function
+def summarize(url):
+    website = Website(url)
+    if not website.text:
+        return f"Could not retrieve content from {url}."
+
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",  # Use the appropriate model name
+            messages=messages_for(website),
+            max_tokens=500,  # Adjust based on desired summary length
+            temperature=0.5,  # Adjust for creativity
+        )
+        summary = response.choices[0].message['content'].strip()
+        return summary
+    except openai.error.OpenAIError as e:
+        return f"An error occurred while summarizing {url}: {e}"
+
+# Cell 9: Define Display Summary Function
+def display_summary(url):
+    print(f"Fetching and summarizing: {url}")
+    summary = summarize(url)
+    if summary:
+        display(Markdown(f"### Summary for [{url}]({url})\n\n{summary}"))
+    print("\n" + "="*80 + "\n")
+
+# Cell 10: Define List of URLs to Summarize
+urls = [
+    "https://www.duesseldorp.de",
+    "https://www.wikipedia.org",
+    "https://www.openai.com",
+    # Add more URLs as needed
+]
+
+# Cell 11: Iterate Over URLs and Display Summaries
+for url in urls:
+    try:
+        display_summary(url)
+    except Exception as e:
+        print(f"Failed to summarize {url}: {e}")
+        print("\n" + "="*80 + "\n")
